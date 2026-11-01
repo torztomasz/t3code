@@ -1,11 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
-import { createEnvironmentSessionAtoms } from "@t3tools/client-runtime/state/session";
 import {
-  type AuthEnvironmentScope,
-  type AuthSessionState,
-  type EnvironmentId,
-  sessionGrantsScope,
-} from "@t3tools/contracts";
+  createEnvironmentSessionAtoms,
+  sessionDeniesScope,
+  sessionHasScope,
+} from "@t3tools/client-runtime/state/session";
+import type { AuthEnvironmentScope, AuthSessionState, EnvironmentId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useMemo } from "react";
@@ -13,28 +12,32 @@ import { useMemo } from "react";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "./atom-registry";
 
+export { sessionHasScope };
 export const environmentSession = createEnvironmentSessionAtoms(connectionAtomRuntime);
 
 const EMPTY_SESSION_STATE_ATOM = Atom.make(AsyncResult.initial<AuthSessionState>());
 
-export function sessionHasScope(
-  result: AsyncResult.AsyncResult<AuthSessionState, unknown>,
-  scope: AuthEnvironmentScope,
-): boolean {
-  const session = AsyncResult.getOrElse(result, () => null);
-  return result._tag !== "Failure" && session !== null && sessionGrantsScope(session, scope);
+function useSessionState(environmentId: EnvironmentId | null) {
+  return useAtomValue(
+    environmentId === null
+      ? EMPTY_SESSION_STATE_ATOM
+      : environmentSession.sessionStateAtom(environmentId),
+  );
 }
 
 export function useEnvironmentScope(
   environmentId: EnvironmentId | null,
   scope: AuthEnvironmentScope,
 ): boolean {
-  const result = useAtomValue(
-    environmentId === null
-      ? EMPTY_SESSION_STATE_ATOM
-      : environmentSession.sessionStateAtom(environmentId),
-  );
-  return sessionHasScope(result, scope);
+  return sessionHasScope(useSessionState(environmentId), scope);
+}
+
+/** Unlike `!useEnvironmentScope`, stays false while the grants are still loading. */
+export function useEnvironmentScopeDenied(
+  environmentId: EnvironmentId | null,
+  scope: AuthEnvironmentScope,
+): boolean {
+  return sessionDeniesScope(useSessionState(environmentId), scope);
 }
 
 export function useEnvironmentsWithScope(

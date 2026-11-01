@@ -1,8 +1,19 @@
 import { pipe } from "effect/Function";
-import type { AuthSessionState, EnvironmentId, ServerConfig } from "@t3tools/contracts";
+import {
+  type AuthEnvironmentScope,
+  type AuthSessionState,
+  EnvironmentAuthInvalidError,
+  type EnvironmentId,
+  EnvironmentOperationForbiddenError,
+  EnvironmentScopeRequiredError,
+  type ServerConfig,
+  sessionGrantsScope,
+} from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { HttpClient } from "effect/http";
@@ -13,7 +24,10 @@ import * as EnvironmentRegistry from "../connection/registry.ts";
 import type { PreparedConnection } from "../connection/model.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as ManagedRelay from "../relay/managedRelay.ts";
-import type { RemoteEnvironmentRequestError } from "../rpc/http.ts";
+import {
+  RemoteEnvironmentAuthUndeclaredStatusError,
+  type RemoteEnvironmentRequestError,
+} from "../rpc/http.ts";
 import type { RpcSession } from "../rpc/session.ts";
 import { safeErrorLogAttributes } from "../errors/safeLog.ts";
 import { executeAuthenticatedEnvironmentHttpRequest } from "./environmentHttpAuth.ts";
@@ -42,6 +56,52 @@ const DEFAULT_SESSION_STATE_TIMEOUT_MS = 6_000;
 const MAX_SESSION_STATE_TIMEOUT_MS = 60_000;
 const SESSION_STATE_RETRY_BASE_MS = 2_000;
 const SESSION_STATE_RETRY_MAX_MS = 60_000;
+
+const isSessionRejectionError = Schema.is(
+  Schema.Union([
+    EnvironmentAuthInvalidError,
+    EnvironmentScopeRequiredError,
+    EnvironmentOperationForbiddenError,
+  ]),
+);
+
+function isSessionRejection(result: AsyncResult.AsyncResult<AuthSessionState, unknown>): boolean {
+  if (result._tag !== "Failure") return false;
+  const error = Option.getOrNull(Cause.findErrorOption(result.cause));
+  if (error instanceof RemoteEnvironmentAuthUndeclaredStatusError) {
+    return error.status === 401 || error.status === 403;
+  }
+  return isSessionRejectionError(error);
+}
+
+/**
+ * The latest session the environment reported. A lookup that failed on the network says
+ * nothing about grants, so it keeps the previous session instead of showing a read-only host.
+ */
+function knownSessionState(
+  result: AsyncResult.AsyncResult<AuthSessionState, unknown>,
+): AuthSessionState | null {
+  if (isSessionRejection(result)) return null;
+  return AsyncResult.getOrElse(result, () => null);
+}
+
+export function sessionHasScope(
+  result: AsyncResult.AsyncResult<AuthSessionState, unknown>,
+  scope: AuthEnvironmentScope,
+): boolean {
+  const session = knownSessionState(result);
+  return session !== null && sessionGrantsScope(session, scope);
+}
+
+/** True only once the environment has answered and the answer lacks the scope. */
+export function sessionDeniesScope(
+  result: AsyncResult.AsyncResult<AuthSessionState, unknown>,
+  scope: AuthEnvironmentScope,
+): boolean {
+  if (isSessionRejection(result)) return true;
+  const session = knownSessionState(result);
+  return session !== null && !sessionGrantsScope(session, scope);
+}
 
 export const fetchEnvironmentSessionState = Effect.fn(
   "clientRuntime.state.fetchEnvironmentSessionState",
