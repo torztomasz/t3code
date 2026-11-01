@@ -1,7 +1,7 @@
 import { pipe } from "effect/Function";
 import {
   type AuthEnvironmentScope,
-  type AuthSessionState,
+  AuthSessionState,
   EnvironmentAuthInvalidError,
   type EnvironmentId,
   EnvironmentOperationForbiddenError,
@@ -25,6 +25,7 @@ import type { PreparedConnection } from "../connection/model.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as ManagedRelay from "../relay/managedRelay.ts";
 import {
+  RemoteEnvironmentAuthFetchError,
   RemoteEnvironmentAuthUndeclaredStatusError,
   type RemoteEnvironmentRequestError,
 } from "../rpc/http.ts";
@@ -64,43 +65,25 @@ const isSessionRejectionError = Schema.is(
     EnvironmentOperationForbiddenError,
   ]),
 );
+const isSessionResponse = Schema.is(AuthSessionState);
 
-function isSessionRejection(result: AsyncResult.AsyncResult<AuthSessionState, unknown>): boolean {
-  if (result._tag !== "Failure") return false;
-  const error = Option.getOrNull(Cause.findErrorOption(result.cause));
+function isSessionRejection(cause: Cause.Cause<unknown>): boolean {
+  const error = Option.getOrNull(Cause.findErrorOption(cause));
   if (error instanceof RemoteEnvironmentAuthUndeclaredStatusError) {
     return error.status === 401 || error.status === 403;
   }
+  // A relay credential the host rejects twice arrives wrapping the `authenticated: false` reply.
+  if (error instanceof RemoteEnvironmentAuthFetchError) return isSessionResponse(error.cause);
   return isSessionRejectionError(error);
 }
 
-/**
- * The latest session the environment reported. A lookup that failed on the network says
- * nothing about grants, so it keeps the previous session instead of showing a read-only host.
- */
-function knownSessionState(
-  result: AsyncResult.AsyncResult<AuthSessionState, unknown>,
-): AuthSessionState | null {
-  if (isSessionRejection(result)) return null;
-  return AsyncResult.getOrElse(result, () => null);
-}
-
-export function sessionHasScope(
-  result: AsyncResult.AsyncResult<AuthSessionState, unknown>,
-  scope: AuthEnvironmentScope,
-): boolean {
-  const session = knownSessionState(result);
-  return session !== null && sessionGrantsScope(session, scope);
-}
-
-/** True only once the environment has answered and the answer lacks the scope. */
+/** Unlike a missing grant, false while the lookup is pending or failed on the network. */
 export function sessionDeniesScope(
   result: AsyncResult.AsyncResult<AuthSessionState, unknown>,
   scope: AuthEnvironmentScope,
 ): boolean {
-  if (isSessionRejection(result)) return true;
-  const session = knownSessionState(result);
-  return session !== null && !sessionGrantsScope(session, scope);
+  if (result._tag === "Success") return !sessionGrantsScope(result.value, scope);
+  return result._tag === "Failure" && isSessionRejection(result.cause);
 }
 
 export const fetchEnvironmentSessionState = Effect.fn(

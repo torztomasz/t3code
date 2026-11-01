@@ -2,9 +2,13 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   createEnvironmentSessionAtoms,
   sessionDeniesScope,
-  sessionHasScope,
 } from "@t3tools/client-runtime/state/session";
-import type { AuthEnvironmentScope, AuthSessionState, EnvironmentId } from "@t3tools/contracts";
+import {
+  type AuthEnvironmentScope,
+  type AuthSessionState,
+  type EnvironmentId,
+  sessionGrantsScope,
+} from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useMemo } from "react";
@@ -12,10 +16,17 @@ import { useMemo } from "react";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "./atom-registry";
 
-export { sessionHasScope };
 export const environmentSession = createEnvironmentSessionAtoms(connectionAtomRuntime);
 
 const EMPTY_SESSION_STATE_ATOM = Atom.make(AsyncResult.initial<AuthSessionState>());
+
+export function sessionHasScope(
+  result: AsyncResult.AsyncResult<AuthSessionState, unknown>,
+  scope: AuthEnvironmentScope,
+): boolean {
+  const session = AsyncResult.getOrElse(result, () => null);
+  return result._tag !== "Failure" && session !== null && sessionGrantsScope(session, scope);
+}
 
 function useSessionState(environmentId: EnvironmentId | null) {
   return useAtomValue(
@@ -32,7 +43,7 @@ export function useEnvironmentScope(
   return sessionHasScope(useSessionState(environmentId), scope);
 }
 
-/** Unlike `!useEnvironmentScope`, stays false while the grants are still loading. */
+/** Unlike `!useEnvironmentScope`, stays false until the host has answered without the scope. */
 export function useEnvironmentScopeDenied(
   environmentId: EnvironmentId | null,
   scope: AuthEnvironmentScope,

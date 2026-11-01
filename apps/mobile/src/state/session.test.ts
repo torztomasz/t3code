@@ -5,7 +5,6 @@ import {
   type AuthSessionState,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
-import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 
@@ -21,8 +20,7 @@ vi.mock("@effect/atom-react", async () => {
   };
 });
 vi.mock("../connection/runtime", () => ({ connectionAtomRuntime: {} }));
-vi.mock("@t3tools/client-runtime/state/session", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@t3tools/client-runtime/state/session")>()),
+vi.mock("@t3tools/client-runtime/state/session", () => ({
   createEnvironmentSessionAtoms: () => ({
     sessionStateAtom: Atom.family((_id: EnvironmentId) =>
       Atom.make(AsyncResult.initial<AuthSessionState, Error>()).pipe(Atom.keepAlive),
@@ -99,18 +97,6 @@ it("reacts to grant revocation, failure, and regrant without a connection list c
   appAtomRegistry.set(source(secondary), AsyncResult.success(session(true)));
   expect(appAtomRegistry.get(observed)).toEqual(new Set([secondary]));
   expect(changes).not.toHaveLength(0);
-});
-
-// A dropped request says nothing about grants; the composer showed "cannot control" after one.
-it("keeps a known grant through a lookup that failed on the network", () => {
-  appAtomRegistry.set(
-    source(secondary),
-    AsyncResult.failure(Cause.fail(new Error("Network request failed")), {
-      previousSuccess: Option.some(AsyncResult.success(session(true))),
-    }),
-  );
-  expect(useEnvironmentScope(secondary, AuthOrchestrationOperateScope)).toBe(true);
-  expect(readEnvironmentScope(secondary, AuthOrchestrationOperateScope)).toBe(true);
 });
 
 it("uses exact new-server permissions and keeps old-server grants usable", () => {

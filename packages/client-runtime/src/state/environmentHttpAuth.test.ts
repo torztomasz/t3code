@@ -12,6 +12,7 @@ import {
   OrchestrationV2ThreadTranscript,
   type OrchestrationV2ThreadHistoryPage,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -21,6 +22,7 @@ import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 import type { HttpClient } from "effect/http";
+import { AsyncResult } from "effect/reactivity";
 
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import {
@@ -33,7 +35,7 @@ import * as ManagedRelay from "../relay/managedRelay.ts";
 import { type RemoteEnvironmentRequestError } from "../rpc/http.ts";
 import * as RpcHttp from "../rpc/http.ts";
 import * as PullRequestDiffLoader from "./pullRequestDiffHttp.ts";
-import { fetchEnvironmentSessionState } from "./session.ts";
+import { fetchEnvironmentSessionState, sessionDeniesScope } from "./session.ts";
 import { fetchEnvironmentShellSnapshot } from "./shellSnapshotHttp.ts";
 import * as ThreadSnapshotLoader from "./threadSnapshotHttp.ts";
 import { fetchEnvironmentThreadTranscript } from "./threadTranscriptHttp.ts";
@@ -590,6 +592,9 @@ describe("authenticated environment HTTP requests", () => {
         _tag: "RemoteEnvironmentAuthFetchError",
         message: "The environment rejected the renewed session authorization.",
       });
+      expect(sessionDeniesScope(AsyncResult.failure(Cause.fail(error)), "orchestration:read")).toBe(
+        true,
+      );
       expect(harness.calls).toHaveLength(2);
     }),
   );
