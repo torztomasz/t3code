@@ -1,3 +1,4 @@
+import type { OrchestrationMessageContext } from "@t3tools/contracts";
 import { Atom, type AtomRegistry } from "effect/reactivity";
 import { msg } from "gt-react-native";
 
@@ -90,10 +91,16 @@ export interface ShareImportDeps {
     draftKey: string,
     content: {
       readonly text: string;
+      readonly context?: OrchestrationMessageContext;
       readonly attachments: ReadonlyArray<DraftComposerAttachment>;
       readonly sourceShareId: string;
     },
   ) => Promise<{ readonly skippedAttachmentCount: number }>;
+  /** Turns links the destination can read, such as pull requests, into context chips. */
+  readonly chipLinks: (
+    share: IncomingShareDraft,
+    destination: IncomingShareDestination,
+  ) => Promise<{ readonly text: string; readonly context?: OrchestrationMessageContext }>;
   readonly selectAttachments: (
     share: IncomingShareDraft,
     environmentId: string,
@@ -217,11 +224,13 @@ export function makeIncomingShareImports(deps: ShareImportDeps) {
       if (selected.status === "pending") {
         throw new Error(m(msg("Server attachment support is still loading.")));
       }
+      const chipped = await deps.chipLinks(share, destination);
+      if (stopped()) return;
       entry.needsRestore = true;
       let skippedAttachmentCount: number;
       try {
         ({ skippedAttachmentCount } = await deps.mergeIntoDraft(draftKey, {
-          text: share.text,
+          ...chipped,
           attachments: selected.attachments,
           sourceShareId: shareId,
         }));

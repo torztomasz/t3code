@@ -102,6 +102,7 @@ function setup(overrides: Partial<ShareImportDeps> = {}) {
       mergeInto(drafts, draftKey, content);
       return { skippedAttachmentCount: 0 };
     }),
+    chipLinks: async (incoming) => ({ text: incoming.text }),
     selectAttachments: (incoming) => ({
       status: "ready",
       attachments: incoming.attachments,

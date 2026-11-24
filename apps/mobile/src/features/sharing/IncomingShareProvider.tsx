@@ -3,7 +3,9 @@ import * as Dialog from "../../components/ui/Dialog";
 import { m } from "../../i18n/messages";
 import Constants from "expo-constants";
 import * as Crypto from "expo-crypto";
-import { EnvironmentId, PROVIDER_SEND_TURN_MAX_FILE_BYTES } from "@t3tools/contracts";
+import { resolveChangeRequestLinkTarget } from "@t3tools/client-runtime/change-request-links";
+import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
+import { EnvironmentId, PROVIDER_SEND_TURN_MAX_FILE_BYTES, ProjectId } from "@t3tools/contracts";
 import {
   clearSharedPayloads,
   getResolvedSharedPayloadsAsync,
@@ -34,7 +36,11 @@ import { isDraftThreadRoute } from "../threads/thread-route-state";
 import { makeIncomingShareImports } from "../threads/incomingShareImport";
 import { liveNewTaskFlowKeys } from "../threads/new-task-flow-state";
 import { appAtomRegistry } from "../../state/atom-registry";
-import { serverEnvironment } from "../../state/server";
+import { environmentProjects } from "../../state/projects";
+import { composerPullRequests } from "../../state/pull-requests";
+import { environmentServerConfigsAtom, serverEnvironment } from "../../state/server";
+import { environmentThreadShells } from "../../state/threads";
+import { chipSharedLinks } from "./sharedLinkChips";
 import {
   getComposerDraftSnapshot,
   mergeComposerDraftContent,
@@ -311,6 +317,44 @@ async function releaseShareReservation(
   publish(await incomingShareInbox.releaseReservation(shareId, expectedDestination));
 }
 
+async function readSharedPullRequest(url: string, destination: IncomingShareDestination) {
+  const serverConfigs = appAtomRegistry.get(environmentServerConfigsAtom);
+  const environmentId = EnvironmentId.make(destination.environmentId);
+  const target = resolveChangeRequestLinkTarget({
+    url,
+    projects: appAtomRegistry.get(environmentProjects.projectsAtom),
+    configLoaded: (id) => serverConfigs.has(id),
+    environmentId,
+    projectId: ProjectId.make(destination.projectId),
+    lendHostProject: true,
+  });
+  if (target === null) return null;
+  const detail = await executeAtomQuery(
+    appAtomRegistry,
+    composerPullRequests.detail({
+      environmentId,
+      input: {
+        projectId: target.project.id,
+        repository: target.repository,
+        number: target.number,
+        ...(target.host === undefined ? {} : { host: target.host }),
+      },
+    }),
+    { label: "mobile:shared-pull-request", reportFailure: false },
+  );
+  if (detail._tag !== "Success") return null;
+  const pullRequest = detail.value;
+  return {
+    number: pullRequest.number,
+    title: pullRequest.title,
+    url: pullRequest.url,
+    headBranch: pullRequest.headBranch,
+    baseBranch: pullRequest.baseBranch,
+    state: pullRequest.state,
+    isDraft: pullRequest.isDraft ?? false,
+  };
+}
+
 /** Moves shares into new-task drafts; see makeIncomingShareImports. */
 export const incomingShareImports = makeIncomingShareImports({
   registry: appAtomRegistry,
@@ -321,6 +365,15 @@ export const incomingShareImports = makeIncomingShareImports({
   readDraft: getComposerDraftSnapshot,
   undoMerge: undoComposerDraftMerge,
   mergeIntoDraft: mergeComposerDraftContent,
+  chipLinks: (share, destination) =>
+    chipSharedLinks(share.text, share.id, {
+      pullRequest: (url) => readSharedPullRequest(url, destination),
+      threadTitle: (ref) =>
+        appAtomRegistry
+          .get(environmentThreadShells.threadShellsAtom)
+          .find((shell) => shell.environmentId === ref.environmentId && shell.id === ref.threadId)
+          ?.title ?? null,
+    }),
   selectAttachments: (share, environmentId) =>
     selectIncomingShareAttachmentsForServer({
       attachments: share.attachments,
