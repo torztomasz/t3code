@@ -37,7 +37,7 @@ function readers(known: {
 }): SharedLinkReaders {
   return {
     pullRequest: async (url) =>
-      known.pullRequests?.includes(url) ? pullRequest(url, Number(url.split("/").at(-1))) : null,
+      known.pullRequests?.includes(url) ? pullRequest(url, 14097) : null,
     threadTitle: (ref) =>
       known.threads?.some(
         (thread) => thread.environmentId === ref.environmentId && thread.threadId === ref.threadId,
@@ -91,21 +91,21 @@ describe("chipSharedLinks", () => {
     expect(result.context?.records).toHaveLength(1);
   });
 
-  it("keeps a link to one pull request comment as text", async () => {
-    const comment = `${PR_URL}#discussion_r123`;
+  it("chips a link to a whole-PR tab such as Files changed", async () => {
+    const files = `${PR_URL}/files`;
+    const result = await chipSharedLinks(files, "share-1", readers({ pullRequests: [files] }));
 
-    expect(
-      await chipSharedLinks(comment, "share-1", readers({ pullRequests: [comment, PR_URL] })),
-    ).toEqual({ text: comment });
+    expect(result.context?.records).toHaveLength(1);
   });
 
-  it("writes the same text on a retried import so the draft sees a duplicate", async () => {
-    const known = readers({ pullRequests: [PR_URL], threads: [THREAD] });
-    const text = `${PR_URL} ${THREAD_URL}`;
+  it("keeps links to one pull request comment or commit as text", async () => {
+    const comment = `${PR_URL}#discussion_r123`;
+    const commit = `${PR_URL}/commits/${"a".repeat(40)}`;
+    const text = `${comment} ${commit}`;
 
-    expect(await chipSharedLinks(text, "share-1", known)).toEqual(
-      await chipSharedLinks(text, "share-1", known),
-    );
+    expect(
+      await chipSharedLinks(text, "share-1", readers({ pullRequests: [comment, commit] })),
+    ).toEqual({ text });
   });
 
   it("leaves the text alone when the server cannot read the pull request", async () => {

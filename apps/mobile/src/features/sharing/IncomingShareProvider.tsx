@@ -368,11 +368,15 @@ export const incomingShareImports = makeIncomingShareImports({
   chipLinks: (share, destination) =>
     chipSharedLinks(share.text, share.id, {
       pullRequest: (url) => readSharedPullRequest(url, destination),
+      // The new task's agent reads threads on its own machine.
       threadTitle: (ref) =>
-        appAtomRegistry
-          .get(environmentThreadShells.threadShellsAtom)
-          .find((shell) => shell.environmentId === ref.environmentId && shell.id === ref.threadId)
-          ?.title ?? null,
+        ref.environmentId === destination.environmentId
+          ? (appAtomRegistry
+              .get(environmentThreadShells.threadShellsAtom)
+              .find(
+                (shell) => shell.environmentId === ref.environmentId && shell.id === ref.threadId,
+              )?.title ?? null)
+          : null,
     }),
   selectAttachments: (share, environmentId) =>
     selectIncomingShareAttachmentsForServer({
